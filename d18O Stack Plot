@@ -1,0 +1,48 @@
+% --- Load δ18O datasets ---
+data1 = readtable('D379_d18O_with_Age_Final_Interpolated_Tenth_S.xlsx');  
+data2 = readtable('EGRIP1mm_d18O_with_Age_Final_Interpolated_Tenth_S.xlsx');  
+data3 = readtable('GISP2_d18O_with_Age1_Final_Interpolated_Tenth_S.xlsx');  
+data4 = readtable('GRIP_d18O_with_Age_Final_Interpolated_Tenth_S.xlsx');  
+data5 = readtable('NGRIP_d18O_with_Age_Final_Interpolated_Tenth_S.xlsx');
+data6 = readtable('NEEM_d18O_with_Age_Final_Interpolated_Tenth_S.xlsx');    
+data7 = readtable('WDC_d18O_with_GISP2_Age_Tenth_S.xlsx'); 
+
+% --- Define common age scale ---
+common_age = (0:0.1:3834)';
+
+% --- Interpolation helper (removes duplicates before interpolating) ---
+interp_unique = @(age, val) interp1( ...
+    accumarray(findgroups(age), age, [], @mean), ...
+    accumarray(findgroups(age), val, [], @mean), ...
+    common_age, 'linear', NaN);
+
+% --- Interpolate δ¹⁸O to common age grid ---
+d18O1 = interp_unique(data1.Age, data1.d18O);
+d18O2 = interp_unique(data2.Age, data2.d18O);
+d18O3 = interp_unique(data3.Age, data3.d18O);
+d18O4 = interp_unique(data4.Age, data4.d18O);
+d18O5 = interp_unique(data5.Age, data5.d18O);
+d18O6 = interp_unique(data6.Age, data6.d18O);
+d18O7 = interp_unique(data7.Age, data7.d18O);
+
+% --- Greenland stack (mean of Greenland cores) ---
+greenland_stack = nanmean([d18O1, d18O2, d18O3, d18O4, d18O5, d18O6], 2);
+
+% --- Remove rows where all data is NaN ---
+valid_rows = ~all(isnan([d18O1, d18O2, d18O3, d18O4, d18O5, d18O6, d18O7]), 2);
+
+% --- Create table for stackedplot ---
+stacked_data = table(common_age(valid_rows), ...
+    d18O1(valid_rows), d18O2(valid_rows), d18O3(valid_rows), ...
+    d18O4(valid_rows), d18O5(valid_rows), d18O6(valid_rows), ...
+    greenland_stack(valid_rows), d18O7(valid_rows), ...
+    'VariableNames', {'Age', 'D379', 'EGRIP', 'GISP2', 'GRIP', 'NGRIP', 'NEEM', 'Grl_Stack', 'WDC'});
+
+% --- Plot using stackedplot ---
+figure('Color', 'w', 'Position', [100, 100, 1000, 600]);
+s = stackedplot(stacked_data, 'XVariable', 'Age', 'LineWidth', 1.2);
+
+% --- Styling ---
+s.Title = 'Polar δ^{18}O Records and Greenland Stack (0–3834 B2K)';
+s.XLabel = 'Age (B2K)';
+s.FontSize = 10;
