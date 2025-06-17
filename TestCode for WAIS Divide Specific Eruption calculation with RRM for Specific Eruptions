@@ -1,0 +1,60 @@
+% Load WAIS Divide dataset
+data = readtable('WDC_d18O_with_GISP2_Age_Tenth_S.xlsx');
+
+% Define specific eruption age to analyze
+eruption_age = 541;  % in B2K
+
+% Running median window size (e.g., 1010 points for ~101 years at 0.1 yr resolution)
+window_points = 101 * 10;
+
+% Extract age and d18O from data
+ages = data.Age;
+d18O = data.d18O;
+
+% First running median to estimate background
+rm1 = movmedian(d18O, window_points, 'omitnan');
+residuals = d18O - rm1;
+std_dev = std(residuals, 'omitnan');
+
+% Mask out potential volcanic outliers beyond ±2 std
+inliers = abs(residuals) <= 2 * std_dev;
+d18O_masked = d18O;
+d18O_masked(~inliers) = NaN;
+
+% Second reduced running median after masking
+background = movmedian(d18O_masked, window_points, 'omitnan');
+
+% Define eruption impact window: -2 to +1 years around eruption
+window_idx = ages >= (eruption_age -2) & ages <= (eruption_age + 1);
+
+% Define pre eruption reference window: +10 to +50 years around eruption
+window_idx1 = ages >= (eruption_age + 10) & ages <= (eruption_age + 50);
+
+% Check if valid data exists in window
+if any(window_idx)
+    mean_d18O = mean(d18O(window_idx), 'omitnan');
+    median_background = median(background(window_idx1), 'omitnan');
+    anomaly = mean_d18O - median_background;
+    temp_anomaly = anomaly * 1.25;
+
+    fprintf('Eruption Age: %d B2K\n', eruption_age);
+    fprintf('Mean d18O: %.4f\n', mean_d18O);
+    fprintf('Background d18O: %.4f\n', median_background);
+    fprintf('d18O Anomaly: %.4f\n', anomaly);
+    fprintf('Estimated Temperature Anomaly: %.4f °C\n', temp_anomaly);
+else
+    warning('No valid data in the analysis window for eruption at %d B2K.', eruption_age);
+end
+
+% Optional: plot background and eruption period
+figure;
+plot(ages, d18O, 'k-', 'DisplayName', 'd18O');
+hold on;
+plot(ages, background, 'b-', 'LineWidth', 1.5, 'DisplayName', 'Background (Running Median)');
+xline(eruption_age, 'r--', 'LineWidth', 1.5, 'DisplayName', 'Eruption Year');
+xlim([eruption_age - 100, eruption_age + 100]);
+xlabel('Age (B2K)');
+ylabel('d18O');
+legend;
+title(sprintf('WAIS Divide d18O around %d B2K', eruption_age));
+grid on;
