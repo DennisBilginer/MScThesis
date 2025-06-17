@@ -1,0 +1,277 @@
+% -------- Load Core Files and Labels --------
+files = {
+    'WDC_d18O_with_GISP2_Age_Tenth_S.xlsx'
+};
+core_labels = {'WAIS Divide'};
+
+eruption_data = readtable('HolVol_with_WD_Age');
+t = -50:50;  % Time window
+
+% -------- Conditions and Labels --------
+conditions = [
+    15, 0, 2000;
+    30, 0, 2000;
+    5, 2000, 3800;
+    30, 2000, 3800;
+    15, 0, 3800;
+    30, 0, 3800
+];
+subplot_titles = {
+    '0–2000 B2K, VSSI ≥ 15', ...
+    '0–2000 B2K, VSSI ≥ 30', ...
+    '2000–3800 B2K, VSSI ≥ 15', ...
+    '2000–3800 B2K, VSSI ≥ 30', ...
+    '0–3800 B2K, VSSI ≥ 15 ', ...
+    '0–3800 B2K, VSSI ≥ 30'
+};
+
+% -------- Initialize --------
+all_core_anomalies = cell(1, size(conditions,1));
+eruption_counts = zeros(1, size(conditions,1));
+scatter_data = cell(1, size(conditions,1));
+
+for i = 1:size(conditions, 1)
+    stacked_matrix = [];
+    used_eruption_ages = [];
+    eruption_anomaly_pairs = [];
+
+    for c = 1:length(files)
+        file = files{c};
+        [mean_anomaly, ~, eruption_ages, anomaly_values] = compute_single_core_anomaly( ...
+            eruption_data, ...
+            conditions(i, 1), conditions(i, 2), conditions(i, 3), ...
+            file, t ...
+        );
+        used_eruption_ages = [used_eruption_ages; eruption_ages(:)];
+        if any(~isnan(mean_anomaly))
+            stacked_matrix = [stacked_matrix, mean_anomaly]; %#ok<AGROW>
+        end
+        eruption_anomaly_pairs = [eruption_anomaly_pairs; [eruption_ages(:), anomaly_values(:)]]; %#ok<AGROW>
+    end
+
+    if ~isempty(stacked_matrix)
+        all_core_anomalies{i} = stacked_matrix;
+        eruption_counts(i) = numel(unique(round(used_eruption_ages)));
+
+        % Bootstrap parameters
+nBoot = 1000;  % Number of bootstrap samples
+
+% Extract all volcanic anomalies for this condition (flatten all anomalies for eruptions)
+all_anomalies = eruption_anomaly_pairs(:,2);
+all_anomalies = all_anomalies(~isnan(all_anomalies));  % Remove NaNs
+
+if ~isempty(all_anomalies)
+    boot_means = NaN(nBoot, 1);
+    N = length(all_anomalies);
+    for b = 1:nBoot
+        sample = datasample(all_anomalies, N);  % Sample with replacement
+        boot_means(b) = mean(sample, 'omitnan');
+    end
+
+    boot_std = std(boot_means, 'omitnan');
+    mean_volc_anomaly = mean(all_anomalies, 'omitnan');
+    SNR = mean_volc_anomaly / boot_std;
+else
+    SNR = NaN;
+end
+
+% Store or print the SNR
+fprintf('Condition %d: SNR = %.3f\n', i, SNR);
+
+        % Aggregate by eruption age: take mean of anomalies for each unique age
+        [unique_ages, ~, idx] = unique(eruption_anomaly_pairs(:,1));
+        mean_anomalies = accumarray(idx, eruption_anomaly_pairs(:,2), [], @(x) mean(x, 'omitnan'), NaN);
+        scatter_data{i} = [unique_ages, mean_anomalies];
+    end
+end
+
+% -------- Plotting --------
+figure('Name', 'Stacked \delta^{18}O Anomalies', 'Color', 'w', 'Position', [100, 100, 900, 800]);
+sgtitle('\delta^{18}O Anomalies Centered on Volcanic Eruptions for Greenland Cores', ...
+    'FontSize', 16, 'FontWeight', 'bold');
+
+for i = 1:6
+    subplot(3,2,i);
+    stacked_matrix = all_core_anomalies{i};
+
+    if ~isempty(stacked_matrix)
+        stacked_mean = nanmean(stacked_matrix, 2);
+        stacked_smooth = movmean(stacked_mean, 5, 'omitnan');
+
+        ref_mask = t >= 10 & t <= 50;
+        ref_values = stacked_mean(ref_mask);
+        baseline_mean = mean(ref_values, 'omitnan');
+        baseline_std = std(ref_values, 'omitnan');
+
+        hold on;
+        plot(t, stacked_mean, '-', 'Color', [0.3 0.3 0.3], 'LineWidth', 1.8);
+        plot(t, stacked_smooth, '-', 'Color', [0.85 0 0], 'LineWidth', 2.5);
+        yline(baseline_mean + 2*baseline_std, '--', 'Color', [0.6 0.6 0.6], 'LineWidth', 1);
+        yline(baseline_mean - 2*baseline_std, '--', 'Color', [0.6 0.6 0.6], 'LineWidth', 1);
+
+        title(subplot_titles{i}, 'FontWeight', 'bold', 'FontSize', 13);
+        xlabel('Years from Eruption', 'FontSize', 11);
+        ylabel('\delta^{18}O Anomaly (\permil)', 'FontSize', 11);
+        xlim([-50 50]);
+        grid on; box on;
+        set(gca, 'FontSize', 10, 'LineWidth', 1, 'TickDir', 'out');
+
+        ylims = ylim;
+        text(-47, ylims(2) - 0.06 * range(ylims), ...
+            ['N = ', num2str(eruption_counts(i))], ...
+            'FontSize', 10, 'Color', 'k', 'FontWeight', 'normal');
+    end
+end
+
+% -------- Scatter Plot of Anomalies vs. Eruption Age --------
+figure('Name', 'Mean Anomalies vs. Eruption Age', 'Color', 'w');
+tiledlayout(3,2);
+for i = 1:6
+    nexttile;
+    scatter_points = scatter_data{i};
+    if ~isempty(scatter_points)
+        scatter(scatter_points(:,1), scatter_points(:,2), 30, 'filled', 'MarkerFaceAlpha', 0.6);
+        xlabel('Eruption Age (B2K)', 'FontSize', 11);
+        ylabel('Mean \delta^{18}O Anomaly ', 'FontSize', 11);
+        title(subplot_titles{i}, 'FontSize', 12);
+        grid on;
+    end
+end
+
+% -------- Colored Scatter Plot by Region --------
+figure('Name', 'Mean Anomalies by Region', 'Color', 'w', 'Position', [100, 100, 900, 800]);
+tiledlayout(3,2);
+for i = 1:6
+    nexttile;
+    valid_idx = (eruption_data.vssi >= conditions(i,1)) & ...
+                (eruption_data.Age1 >= conditions(i,2)) & ...
+                (eruption_data.Age1 <= conditions(i,3));
+
+    valid_eruption_ages = eruption_data.Age1(valid_idx);
+    valid_lats = eruption_data.lat(valid_idx);
+    valid_VSSI = eruption_data.vssi(valid_idx);
+
+    eruption_ages = scatter_data{i}(:,1);
+    mean_anomalies = scatter_data{i}(:,2);
+
+    valid_anomalies = NaN(size(valid_eruption_ages));
+    for k = 1:length(valid_eruption_ages)
+        idx_match = find(abs(eruption_ages - valid_eruption_ages(k)) < 1e-6, 1);
+        if ~isempty(idx_match)
+            valid_anomalies(k) = mean_anomalies(idx_match);
+        end
+    end
+
+    colors = zeros(length(valid_lats), 3);
+    for k = 1:length(valid_lats)
+        lat = valid_lats(k);
+        if lat >= -30 && lat <= 30
+            colors(k, :) = [0.4660, 0.6740, 0.1880];
+        elseif lat > 30 && lat <= 62
+            colors(k, :) = [0, 0.4470, 0.7410];
+        elseif lat < -30 && lat >= -90
+            colors(k, :) = [0.6350, 0.0780, 0.1840];
+        elseif lat > 63 && lat <= 65
+            colors(k, :) = [0.9290, 0.6940, 0.1250];
+        end
+    end
+
+    scatter(valid_eruption_ages, valid_anomalies, valid_VSSI * 5, colors, 'filled', 'MarkerFaceAlpha', 0.7);
+    grid on; box on;
+    xlabel('Eruption Age (B2K)', 'FontSize', 11);
+    ylabel('Mean \delta^{18}O Anomaly ', 'FontSize', 11);
+    title(subplot_titles{i}, 'FontSize', 12);
+
+    hold on;
+    scatter(NaN, NaN, 60, [0.4660, 0.6740, 0.1880], 'filled', 'DisplayName', 'Tropics');
+    scatter(NaN, NaN, 60, [0, 0.4470, 0.7410], 'filled', 'DisplayName', 'NHET');
+    scatter(NaN, NaN, 60, [0.6350, 0.0780, 0.1840], 'filled', 'DisplayName', 'SHET');
+    scatter(NaN, NaN, 60, [0.9290, 0.6940, 0.1250], 'filled', 'DisplayName', 'Iceland');
+    hold off;
+end
+
+% --- Size Legend: Custom Bubble Style ---
+hold on;
+
+% Position for the size legend (adjust as needed)
+x0 = 3600;   % Age (X axis position)
+y0 = min(valid_anomalies) - 0.8;  % Base Y position
+
+% Define sizes and scale
+vssi_sizes = [45, 30, 15];  % From largest to smallest
+labels = {'VSSI = 45', 'VSSI = 30', 'VSSI = 15'};
+
+% Scale (same used in main plot)
+marker_scale = 5;
+
+% Plot concentric circles from largest to smallest
+for i = 1:length(vssi_sizes)
+    scatter(x0, y0, vssi_sizes(i) * marker_scale, ...
+        [0.5 0.5 0.5], 'filled', ...
+        'MarkerFaceAlpha', 0.3 + 0.2 * i, ...
+        'MarkerEdgeColor', 'k');
+    
+    % Add text label next to each circle
+    text(x0 + 20, y0, labels{i}, 'FontSize', 10, 'VerticalAlignment', 'middle');
+    
+    % Shift upward for next smaller circle
+    y0 = y0 + sqrt(vssi_sizes(i)) * 0.03;  % Stagger to avoid overlap
+end
+
+
+% -------- FUNCTION --------
+function [mean_anomaly, mean_anomaly_smooth, eruption_ages, anomaly_values] = ...
+    compute_single_core_anomaly(eruption_data, vssi_thresh, min_age, max_age, file, t)
+
+    valid_idx = (eruption_data.vssi >= vssi_thresh) & ...
+                (eruption_data.Age1 >= min_age & eruption_data.Age1 <= max_age);
+    eruption_ages = eruption_data.Age1(valid_idx);
+
+    data = readtable(file);
+    ages = data.Age;
+    d18O = data.d18O;
+    core_anomalies = NaN(length(t), length(eruption_ages));
+    anomaly_values = NaN(length(eruption_ages), 1);
+
+    for j = 1:length(eruption_ages)
+        eruption_age = eruption_ages(j);
+        win_idx = find(ages >= (eruption_age - 50) & ages <= (eruption_age + 50));
+        win_ages = ages(win_idx);
+        win_d18O = d18O(win_idx);
+
+        if length(win_ages) < 10
+            continue;
+        end
+
+        p = polyfit(win_ages, win_d18O, 1);
+        trend = polyval(p, win_ages);
+        detrended = win_d18O - trend;
+
+        centered_years = round(win_ages - eruption_age);
+        slice = NaN(size(t));
+        for k = 1:length(t)
+            match = find(centered_years == t(k));
+            if ~isempty(match)
+                slice(k) = detrended(match(1));
+            end
+        end
+
+        ref_mask = t >= 10 & t <= 50;
+        ref_vals = slice(ref_mask);
+        ref_mu = mean(ref_vals, 'omitnan');
+        ref_sigma = std(ref_vals, 'omitnan');
+        inliers = abs(ref_vals - ref_mu) <= 2 * ref_sigma;
+        ref_baseline = mean(ref_vals(inliers), 'omitnan');
+
+        if ~isnan(ref_baseline)
+            normalized = slice - ref_baseline;
+            core_anomalies(:, j) = normalized;
+
+            anomaly_window = t >= -9 & t <= + 1;
+            anomaly_values(j) = mean(normalized(anomaly_window), 'omitnan');
+        end
+    end
+
+    mean_anomaly = nanmean(core_anomalies, 2);
+    mean_anomaly_smooth = movmean(mean_anomaly, 5, 'omitnan');
+end
